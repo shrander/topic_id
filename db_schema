@@ -1,0 +1,1 @@
+CREATE TABLE movie_table (id INTEGER NOT NULL, title TEXT(50), plot TEXT(1000), rating TEXT(10), lead_actor TEXT(50), genre_list TEXT(100), PRIMARY KEY(id), UNIQUE(id));
