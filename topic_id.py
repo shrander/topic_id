@@ -1,8 +1,12 @@
+#!/usr/bin/python
+import time 
 import sys
 import operator
 import pygame
+import cPickle
 from imdb import IMDb
 import sqlite3 as sql
+import pytagcloud
 
 class parser:
     def __init__(self):
@@ -14,7 +18,7 @@ class parser:
         text - text blob to be tokenized
         n - n-gram depth
         """
-        wordlist = text.split()
+        wordlist = text.lower().split()
         i=0
         nGramList = []
         while(i<len(wordlist)):
@@ -53,9 +57,7 @@ class parser:
             if each not in hist:
                 hist[each] = ngram_list.count(each)
         return hist
-    
 
-        
 class topic_id:
     def __init__(self):
         self.db_file = ''
@@ -63,8 +65,11 @@ class topic_id:
         self.db_cursor = None
         self.synopsis_file = ''
         self.syn_hndl = None
+        self.synopsis_flag = False
         self.training_flag = False
         self.n_depth = 2
+        
+        self.genre_hist = {}
         
         self.p = parser()
         
@@ -76,10 +81,9 @@ class topic_id:
         print 'This program will determine what genres a movie is in by the contents of the title and synapsis'
         print 'Options:'
         print ' -n              depth for the n-gram parser'
-        print ' -T              Sets the training flag.  The file expected is one generated'
+        print ' -T [file]       Sets the training flag.  The file expected is one generated'
         print '                  by db_pop.py.'
-        print '[file]           File to train against (requires the \'T\' flag) or a synopsis file'
-        print '                  synopsis file to detect genre'
+        print '[file]           Synopsis file to identify topics'
         sys.exit()
 
     def parse_args(self, args):
@@ -97,15 +101,18 @@ class topic_id:
             else:
                 #assume the synopsis file is the unknown
                 self.synopsis_file = args[i]
+                self.synopsis_flag = True
             i+=1
     
     def init_data(self):
+        pygame.init()
+        pygame.mixer.init()
         try:
             if self.training_flag:
                 # connect to DB
                 self.db_conn = sql.connect(self.db_file)
                 self.db_cursor = self.db_conn.cursor()
-            else:
+            if self.synopsis_flag:
                 # or open synopsis file
                 self.syn_hndl = open(self.synopsis_file, 'r')
         except IOError as e:
@@ -113,34 +120,70 @@ class topic_id:
         except sql.Error, e:
             print e
     
-    def train(self):
-        # walk through db
-        # cat all plot summaries for a genre and send to create_hist
-        # workout some training object
-        # build training object
+    def get_genres(self):
+        genre_list=[]
         genre_query = self.db_cursor.execute('SELECT genre_list FROM movie_table;')
-        genre_list = []
         for each in genre_query.fetchall():
             genre = each[0].split(',')
             for each_gen in genre:
                 if each_gen not in genre_list:
                     genre_list.append(each_gen)
+        return genre_list
         
+    def train(self):
+        """
+        Build a trained object to be able to compare future synopses against
+        
+        returns a dictionary of histograms.  Keys of the dict are the genres
+        """
+        genre_list = self.get_genres()
+        genre_hist={}
         for each in genre_list:
             plot_blob = ''
             print 'Training on '+each
             plot_query = self.db_cursor.execute('SELECT plot FROM movie_table WHERE genre_list LIKE \'%'+each+'%\';')
             for row in plot_query.fetchall():
                  plot_blob += ' '+row[0].split('::')[0]
-            self.p.print_top_n_most_ngrams(self.p.build_hist(plot_blob, self.n_depth))
-            return 
+            genre_hist[each] = self.p.build_hist(plot_blob, self.n_depth)
+        print '\nStoring Training data'
+        self.store_genre_data(genre_hist)        
+        return genre_hist
     
+    def store_genre_data(self, data):
+        self.genre_hist = data
+        fh = open('.topic_id.dat', 'w')
+        cPickle.dump(data, fh)
+        fh.close()
+    
+    def load_genre_data(self):
+        fh = open('.topic_id.dat', 'r')
+        self.genre_hist = cPickle.load(fh)
+        fh.close()
+        # make sure that the n-gram depth matches the training data
+        genre = self.genre_hist.keys()[0]
+        if self.n_depth != len(self.genre_hist[genre].keys()[0]):
+            print 'Alter ngram depth to match trained data'
+            self.n_depth = len(self.genre_hist[genre].keys()[0])
+        
+    def score(self, hist):
+        """
+        builds a dictionary of genres and scores the input text with the training data
+        hist - a dictionary of n-grams and their counts
+        """
+        scores = {}
+        for each in hist.keys():
+            genre_ngram_tot = 0
+            for each_genre in self.genre_hist.keys():
+                self.genre_hist[each_genre]
+
+
     def find_topics(self):
         #parse text
         # send to parser object and build hist
         # somehow need to figure out what are good n-grams and determine if those are 
         # 
-        pass
+        syn_hist = self.p.build_hist(self.syn_hndl.read(),self.n_depth)
+        scores = self.score(syn_hist)
         
     def main(self, args):
         self.parse_args(args)
@@ -148,16 +191,23 @@ class topic_id:
         if self.training_flag:
             self.train()
         else:
+            try:
+                self.load_genre_data()
+            except IOError as e:
+                print e
+                print 'Could not load pregenerated data.  Retrainning required!'
+                raise Exception('LoadError')
+        if self.synopsis_flag:
             self.find_topics()
-        print 'play sound'
-        pygame.init()
-        pygame.mixer.init()
-        sound = pygame.mixer.Sound('/Developer/Python/pygame/Examples/data/punch.wav')
-        sound.play()
+
+        # Noise to signal stop
+        pygame.mixer.Sound('/Developer/Python/pygame/Examples/data/punch.wav').play()
+        time.sleep(1)
+        
 
 if __name__ == '__main__':
-#    try:
-    a = topic_id()
-    a.main(sys.argv)
-#    except KeyboardInterrupt as e:
-#        print e
+    try:
+        a = topic_id()
+        a.main(sys.argv)
+    except KeyboardInterrupt as e:
+        print e
