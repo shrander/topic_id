@@ -69,6 +69,8 @@ class topic_id:
         self.training_flag = False
         self.n_depth = 2
         
+        self.norm = False
+        
         self.genre_hist = {}
         
         self.p = parser()
@@ -88,8 +90,6 @@ class topic_id:
 
     def parse_args(self, args):
         i=0
-        if len(args)<=1:
-            self.usage()
         while(i<len(args)):
             if args[i] == '-T':
                 i+=1
@@ -98,6 +98,8 @@ class topic_id:
             elif args[i] == '-n':
                 i+=1
                 self.n_depth = int(args[i])
+            elif args[i] == '-N':
+                self.Normalize=True
             else:
                 #assume the synopsis file is the unknown
                 self.synopsis_file = args[i]
@@ -145,10 +147,23 @@ class topic_id:
             for row in plot_query.fetchall():
                  plot_blob += ' '+row[0].split('::')[0]
             genre_hist[each] = self.p.build_hist(plot_blob, self.n_depth)
+        self.normalize(genre_hist)
         print '\nStoring Training data'
         self.store_genre_data(genre_hist)        
         return genre_hist
     
+    def normalize(self, hist):
+        """
+        normalizes the data
+        hist
+        """
+        return
+        sums={}
+        for each_genre in hist.keys():
+            sum[each_genre]=0
+            for each in hist[each_genre].keys():
+                hist[each_genre][each]
+        
     def store_genre_data(self, data):
         self.genre_hist = data
         fh = open('.topic_id.dat', 'w')
@@ -171,11 +186,13 @@ class topic_id:
         hist - a dictionary of n-grams and their counts
         """
         scores = {}
-        for each in hist.keys():
-            genre_ngram_tot = 0
-            for each_genre in self.genre_hist.keys():
-                self.genre_hist[each_genre]
-
+        for each_genre in self.genre_hist.keys():
+            scores[each_genre]=0
+            for each_n_gram in self.genre_hist[each_genre].keys():
+                for each in hist.keys():
+                    if each == each_n_gram:
+                        scores[each_genre] += hist[each]*self.genre_hist[each_genre][each_n_gram]
+        return scores
 
     def find_topics(self):
         #parse text
@@ -184,19 +201,25 @@ class topic_id:
         # 
         syn_hist = self.p.build_hist(self.syn_hndl.read(),self.n_depth)
         scores = self.score(syn_hist)
-        
+        for each in scores.keys():
+            print each +': '+str(scores[each])
+
     def main(self, args):
         self.parse_args(args)
         self.init_data()
+        
         if self.training_flag:
             self.train()
         else:
             try:
                 self.load_genre_data()
+                if self.norm:
+                    self.normalize(self.genre_hist)
             except IOError as e:
                 print e
                 print 'Could not load pregenerated data.  Retrainning required!'
                 raise Exception('LoadError')
+        
         if self.synopsis_flag:
             self.find_topics()
 
@@ -208,6 +231,6 @@ class topic_id:
 if __name__ == '__main__':
     try:
         a = topic_id()
-        a.main(sys.argv)
+        a.main(sys.argv[1:])
     except KeyboardInterrupt as e:
         print e
